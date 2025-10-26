@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  # PostgreSQL + PostGIS (空间数据库)
+  postgres:
+    image: postgis/postgis:14-3.2
+    container_name: water_postgres
+    environment:
+      POSTGRES_DB: water_resources
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # InfluxDB (时序数据库)
+  influxdb:
+    image: influxdb:1.8
+    container_name: water_influxdb
+    environment:
+      INFLUXDB_DB: water_monitoring
+      INFLUXDB_ADMIN_USER: admin
+      INFLUXDB_ADMIN_PASSWORD: admin123
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb
+    restart: unless-stopped
+
+  # Redis (缓存)
+  redis:
+    image: redis:7-alpine
+    container_name: water_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  # MinIO (对象存储)
+  minio:
+    image: minio/minio:latest
+    container_name: water_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+  # Grafana (可视化监控)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: water_grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin123
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - influxdb
+      - postgres
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  influxdb_data:
+  redis_data:
+  minio_data:
+  grafana_data:
