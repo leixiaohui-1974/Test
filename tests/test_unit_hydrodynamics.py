@@ -120,14 +120,14 @@ def test_preissmann_simple_channel():
         enable_adaptive_mesh=False,
     )
     
-    # 运行短时间仿真
-    print("\n运行仿真: 600秒 (10分钟), 时间步长=10秒")
+    # 运行短时间仿真（使用更小的时间步长以保证稳定性）
+    print("\n运行仿真: 300秒 (5分钟), 时间步长=5秒")
     results = solver.solve(
-        total_time=600.0,
-        dt=10.0,
+        total_time=300.0,
+        dt=5.0,
         initial_depth=2.0,
         initial_discharge=10.0,
-        save_interval=5,
+        save_interval=10,
     )
     
     print(f"\n结果统计:")
@@ -150,6 +150,10 @@ def test_preissmann_simple_channel():
     print(f"\n最终水深分布: {final_depths}")
     depth_variation = np.std(final_depths)
     print(f"水深标准差: {depth_variation:.4f} m")
+    
+    # 检查数值合理性
+    assert np.max(results.depths) < 10.0, f"水深过大: {np.max(results.depths)}"
+    assert np.max(results.velocities) < 10.0, f"流速过大: {np.max(results.velocities)}"
     
     # 绘图
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))
