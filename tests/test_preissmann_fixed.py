@@ -114,18 +114,18 @@ def test_steady_to_unsteady():
         enable_adaptive_mesh=False,
     )
     
-    # 求解
+    # 求解（使用更严格的参数）
     print("\n开始非恒定流模拟...")
     results = solver.solve(
         total_time=1800.0,  # 30分钟
-        dt=5.0,  # 初始时间步长5秒
+        dt=2.0,  # 初始时间步长2秒（更小）
         initial_depth=initial_depth,
         initial_discharge=10.0,
-        save_interval=10,
+        save_interval=20,
         use_adaptive_dt=True,
-        cfl_max=0.9,
-        min_dt=1.0,
-        max_dt=30.0,
+        cfl_max=0.5,  # 更严格的CFL条件
+        min_dt=0.5,  # 最小0.5秒
+        max_dt=10.0,  # 最大10秒
     )
     
     return results, channel, "稳态到非恒定"
@@ -175,14 +175,14 @@ def test_medium_change():
     print("\n开始非恒定流模拟...")
     results = solver.solve(
         total_time=1800.0,
-        dt=5.0,
+        dt=2.0,  # 初始时间步长2秒
         initial_depth=initial_depth,
         initial_discharge=10.0,
-        save_interval=10,
+        save_interval=20,
         use_adaptive_dt=True,
-        cfl_max=0.9,
-        min_dt=1.0,
-        max_dt=30.0,
+        cfl_max=0.5,  # 严格CFL
+        min_dt=0.5,
+        max_dt=10.0,
     )
     
     return results, channel, "中等变化"
