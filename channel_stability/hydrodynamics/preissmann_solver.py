@@ -61,11 +61,11 @@ class PreissmannHydrodynamicSolver:
         self,
         channel: ChannelSystem,
         boundary_conditions: BoundaryConditions,
-        theta: float = 0.65,  # 降低以提高稳定性
-        max_iterations: int = 50,  # 增加迭代次数
-        convergence_tol: float = 1e-5,  # 更严格的收敛
+        theta: float = 0.7,  # 时间权重系数
+        max_iterations: int = 30,  # Picard迭代次数
+        convergence_tol: float = 1e-4,  # 收敛容差
         min_depth: float = 1e-3,
-        relaxation: float = 0.03,  # 减小松弛因子
+        relaxation: float = 0.05,  # 松弛因子
         enable_adaptive_mesh: bool = True,
         adaptive_mesh_interval: int = 10,
     ):
@@ -392,27 +392,10 @@ class PreissmannHydrodynamicSolver:
                 )
                 mesh_quality_history.append(metrics)
             
-            # 质量守恒检查和温和校正
+            # 质量守恒检查（仅监控，不在阶跃时刻校正）
             q_inlet = discharges[0]
             q_outlet = discharges[-1]
             mass_balance_error = abs(q_outlet - q_inlet) / (q_inlet + 1e-10)
-            
-            # 温和的质量守恒校正（仅在误差较大时）
-            if mass_balance_error > 0.05:  # 误差>5%时校正
-                # 非常温和的校正：调整所有内部节点的流量
-                q_target = q_inlet  # 目标流量（保持入口流量）
-                q_current = discharges[-1]
-                correction_factor = q_target / (q_current + 1e-10)
-                
-                # 仅对内部节点应用温和的校正（避免破坏边界条件）
-                for i in range(1, num_sections - 1):
-                    # 线性插值校正因子（靠近下游校正更多）
-                    weight = i / (num_sections - 1)
-                    local_correction = 1.0 + weight * (correction_factor - 1.0) * 0.2  # 仅20%强度
-                    discharges[i] *= local_correction
-                
-                # 下游节点也应用校正
-                discharges[-1] = discharges[-2]
             
             # 保存结果
             if save_interval is None or step % save_interval == 0:

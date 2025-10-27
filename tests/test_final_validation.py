@@ -136,23 +136,23 @@ def test_scenario(scenario_name, scenario, output_dir):
     hydro_solver = PreissmannHydrodynamicSolver(
         channel=channel,
         boundary_conditions=bc,
-        theta=0.65,
-        max_iterations=50,
-        convergence_tol=1e-5,
-        relaxation=0.03,
+        theta=0.7,
+        max_iterations=30,
+        convergence_tol=1e-4,
+        relaxation=0.05,
         enable_adaptive_mesh=False,
     )
     
     hydro_results = hydro_solver.solve(
         total_time=total_time,
-        dt=2.0,
+        dt=5.0,  # 初始5秒
         initial_depth=initial_depth,
         initial_discharge=initial_discharge,
-        save_interval=20,
+        save_interval=10,
         use_adaptive_dt=True,
-        cfl_max=0.5,
-        min_dt=0.5,
-        max_dt=10.0,
+        cfl_max=0.8,  # 稍微放宽，提高稳定性
+        min_dt=1.0,
+        max_dt=20.0,
     )
     
     # 水质模拟
