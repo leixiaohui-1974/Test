@@ -254,35 +254,34 @@ class PreissmannHydrodynamicSolver:
             q_up = max(self.bc.get_upstream_discharge(t_next), 0.0)
             discharges[0] = q_up
             
-            # 上游水深：从连续性和Manning方程推导
-            # 使用上一步的水深作为初值，通过迭代求解
+            # 上游水深：使用稳健的迭代方法
             section_0 = sections[0]
             h_guess = depths[0]  # 使用上一步水深作为初值
             
-            # 牛顿迭代求解上游水深
-            for _ in range(10):
+            # 简单但稳健的迭代（基于流速合理性）
+            for iter_count in range(15):
                 area = section_0.area(h_guess)
                 if area < 1e-6:
                     h_guess = self.min_depth
                     break
                 
-                # 根据连续性和摩阻计算所需水深
-                # Q = A * V, V = (1/n) * R^(2/3) * sqrt(S)
-                # 简化：使用上游流量和断面特性估算水深
-                velocity_estimate = q_up / area
+                velocity = q_up / area
                 
-                # 限制流速在合理范围
-                if velocity_estimate > 3.0:
-                    # 水深过小，需要增加
-                    h_guess = h_guess * 1.2
-                elif velocity_estimate < 0.1:
-                    # 水深过大，需要减小
-                    h_guess = max(h_guess * 0.8, self.min_depth)
+                # 根据流速调整水深（更保守的策略）
+                if velocity > 2.5:  # 流速过大
+                    h_new = h_guess * 1.05  # 增加5%
+                elif velocity < 0.3:  # 流速过小
+                    h_new = h_guess * 0.95  # 减少5%
                 else:
-                    # 合理范围，退出迭代
+                    # 流速在合理范围[0.3, 2.5] m/s
                     break
                 
-                # 限制在合理范围
+                # 检查收敛
+                if abs(h_new - h_guess) / h_guess < 0.01:
+                    h_guess = h_new
+                    break
+                
+                h_guess = h_new
                 h_guess = np.clip(h_guess, self.min_depth, section_0.max_depth)
             
             depths[0] = h_guess
@@ -369,13 +368,11 @@ class PreissmannHydrodynamicSolver:
                     depths[i] = depth_new
                 
                 # 下游边界条件（水位边界）
-                # 指定水深，流量通过连续性方程计算
-                q_down = discharges[-2]  # 初始估计
+                q_down = discharges[-2]
                 h_down = self.bc.get_downstream_stage(t_next, q_down)
                 depths[-1] = max(h_down - bed_elevations[-1], self.min_depth)
                 
-                # 流量从上游传递，而非直接赋值
-                # 这样保证质量守恒
+                # 流量从上游传递，保证连续性
                 discharges[-1] = discharges[-2]
                 
                 # 检查收敛性
@@ -395,6 +392,11 @@ class PreissmannHydrodynamicSolver:
                 )
                 mesh_quality_history.append(metrics)
             
+            # 质量守恒检查（仅监控，不调整）
+            q_inlet = discharges[0]
+            q_outlet = discharges[-1]
+            mass_balance_error = abs(q_outlet - q_inlet) / (q_inlet + 1e-10)
+            
             # 保存结果
             if save_interval is None or step % save_interval == 0:
                 saved_times.append(t_next)
@@ -411,7 +413,7 @@ class PreissmannHydrodynamicSolver:
                            if sections[i].area(depths[i]) > 1e-6 else 0 
                            for i in range(num_sections))
                 print(f"进度: {progress:.1f}% (t={t_curr/3600:.2f}h, 步数={step}, "
-                      f"dt={current_dt:.2f}s, v_max={v_max:.3f}m/s)")
+                      f"dt={current_dt:.2f}s, v_max={v_max:.3f}m/s, 质守={mass_balance_error*100:.1f}%)")
         
         # 构造结果
         saved_times = np.array(saved_times)
