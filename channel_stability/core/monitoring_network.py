@@ -57,12 +57,21 @@ class MonitoringStation:
         """添加观测数据"""
         self.observation_times.append(time)
         
+        # 确保所有数组长度一致
         if groundwater_level is not None:
             self.groundwater_levels.append(groundwater_level)
+        elif len(self.groundwater_levels) < len(self.observation_times):
+            self.groundwater_levels.append(np.nan)
+            
         if rainfall is not None:
             self.rainfall_intensity.append(rainfall)
+        elif len(self.rainfall_intensity) < len(self.observation_times):
+            self.rainfall_intensity.append(0.0)
+            
         if water_level is not None:
             self.water_levels.append(water_level)
+        elif len(self.water_levels) < len(self.observation_times):
+            self.water_levels.append(np.nan)
     
     def get_latest_observation(self) -> Tuple[float, Dict[str, float]]:
         """获取最新观测数据"""

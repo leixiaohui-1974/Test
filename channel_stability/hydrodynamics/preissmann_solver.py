@@ -181,7 +181,10 @@ class PreissmannHydrodynamicSolver:
         
         # 初始化状态变量
         depths = np.full(num_sections, initial_depth, dtype=float)
-        discharges = np.full(num_sections, initial_discharge, dtype=float)
+        
+        # 初始流量：根据边界条件设置
+        initial_q = self.bc.get_upstream_discharge(0.0)
+        discharges = np.full(num_sections, initial_q, dtype=float)
         
         # 时间步进
         num_steps = int(total_time / dt) + 1
@@ -263,11 +266,28 @@ class PreissmannHydrodynamicSolver:
                            (1 - self.theta) * (old_discharges[i] - old_discharges[i - 1])
                     
                     area_new = area_old - (dt / dx) * flux
-                    area_new = max(area_new, self.min_depth * section.bottom_width)
+                    min_area = self.min_depth * section.bottom_width
+                    area_new = max(area_new, min_area)
                     
-                    depth_new = area_new / section.bottom_width if section.bottom_width > 0 else self.min_depth
+                    # 正确：从面积反推水深（考虑边坡）
+                    # A = b*h + m*h^2, 求解h
+                    b = section.bottom_width
+                    m = section.side_slope
+                    if m > 0:
+                        # 二次方程: m*h^2 + b*h - A = 0
+                        discriminant = b**2 + 4*m*area_new
+                        if discriminant > 0:
+                            depth_new = (-b + np.sqrt(discriminant)) / (2*m)
+                        else:
+                            depth_new = self.min_depth
+                    else:
+                        # 矩形断面
+                        depth_new = area_new / b if b > 0 else self.min_depth
+                    
                     depth_new = max(depth_new, self.min_depth)
-                    depth_new = np.clip(depth_new, prev_depths[i] - 0.5, prev_depths[i] + 0.5)
+                    # 限制变化幅度，避免数值震荡
+                    depth_new = np.clip(depth_new, prev_depths[i] - 0.2, prev_depths[i] + 0.2)
+                    depth_new = np.clip(depth_new, self.min_depth, section.max_depth)
                     
                     depths[i] = depth_new
                 

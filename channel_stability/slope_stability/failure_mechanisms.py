@@ -130,9 +130,9 @@ class LiningStabilityAnalysis:
         if driving_force > 1e-6:
             factor = resisting_force / driving_force
         else:
-            factor = 999.9
+            factor = 10.0  # 下滑力很小，认为非常稳定
         
-        return max(factor, 0.0)
+        return min(max(factor, 0.0), 10.0)  # 限制在0-10范围
     
     @staticmethod
     def compute_overturning_stability(
@@ -184,12 +184,16 @@ class LiningStabilityAnalysis:
             water_arm = water_height / 3.0
             overturning_moment = water_force * water_arm
         else:
-            overturning_moment = 1e-6  # 避免除零
+            # 无地下水，无倾覆力矩
+            return 10.0  # 非常稳定
         
         # 稳定系数
-        factor = resisting_moment / overturning_moment
+        if overturning_moment > 1e-6:
+            factor = resisting_moment / overturning_moment
+        else:
+            factor = 10.0
         
-        return max(factor, 0.0)
+        return min(max(factor, 0.0), 10.0)  # 限制在0-10范围
     
     @staticmethod
     def compute_uplift_stability(
@@ -234,9 +238,9 @@ class LiningStabilityAnalysis:
         if uplift_force > 1e-6:
             factor = total_weight / uplift_force
         else:
-            factor = 999.9
+            factor = 10.0  # 无浮托力，非常稳定
         
-        return max(factor, 0.0)
+        return min(max(factor, 0.0), 10.0)  # 限制在0-10范围
     
     @staticmethod
     def compute_seepage_stability(
@@ -258,7 +262,7 @@ class LiningStabilityAnalysis:
         """
         if groundwater_depth >= slope_height:
             # 无渗透
-            return 999.9
+            return 10.0
         
         # 水力梯度（简化计算）
         water_level_diff = max(channel_water_level, 0.0)
@@ -276,9 +280,9 @@ class LiningStabilityAnalysis:
         if hydraulic_gradient > 1e-6:
             factor = critical_gradient / hydraulic_gradient
         else:
-            factor = 999.9
+            factor = 10.0  # 无渗透，非常稳定
         
-        return max(factor, 0.0)
+        return min(max(factor, 0.0), 10.0)  # 限制在0-10范围
     
     @staticmethod
     def compute_comprehensive_stability(
