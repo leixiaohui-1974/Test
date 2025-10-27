@@ -61,11 +61,11 @@ class PreissmannHydrodynamicSolver:
         self,
         channel: ChannelSystem,
         boundary_conditions: BoundaryConditions,
-        theta: float = 0.7,
-        max_iterations: int = 25,
-        convergence_tol: float = 1e-4,
+        theta: float = 0.7,  # 时间权重系数
+        max_iterations: int = 30,  # Picard迭代次数
+        convergence_tol: float = 1e-4,  # 收敛容差
         min_depth: float = 1e-3,
-        relaxation: float = 0.05,
+        relaxation: float = 0.05,  # 松弛因子
         enable_adaptive_mesh: bool = True,
         adaptive_mesh_interval: int = 10,
     ):
@@ -147,22 +147,34 @@ class PreissmannHydrodynamicSolver:
         initial_depth: float = 1.0,
         initial_discharge: float = 0.0,
         save_interval: Optional[int] = None,
+        use_adaptive_dt: bool = True,
+        cfl_max: float = 0.9,
+        min_dt: float = 0.5,
+        max_dt: float = 60.0,
     ) -> HydrodynamicResults:
         """
-        求解非恒定流
+        求解非恒定流（修复版）
         
         Parameters
         ----------
         total_time : float
             总模拟时间 (s)
         dt : float
-            时间步长 (s)
+            初始时间步长 (s)
         initial_depth : float
             初始水深 (m)
         initial_discharge : float
             初始流量 (m³/s)
         save_interval : int, optional
             保存结果的时间步间隔
+        use_adaptive_dt : bool
+            是否使用自适应时间步长
+        cfl_max : float
+            最大CFL数
+        min_dt : float
+            最小时间步长 (s)
+        max_dt : float
+            最大时间步长 (s)
         
         Returns
         -------
@@ -186,9 +198,9 @@ class PreissmannHydrodynamicSolver:
         initial_q = self.bc.get_upstream_discharge(0.0)
         discharges = np.full(num_sections, initial_q, dtype=float)
         
-        # 时间步进
-        num_steps = int(total_time / dt) + 1
-        times = np.arange(0, total_time + dt, dt)
+        # 时间步进（修改为动态时间步）
+        current_dt = dt
+        dt_history = []  # 记录时间步长历史
         
         # 存储结果（按save_interval采样）
         saved_times = []
@@ -201,20 +213,78 @@ class PreissmannHydrodynamicSolver:
         saved_depths.append(depths.copy())
         saved_discharges.append(discharges.copy())
         
-        # 主时间循环
-        for step in range(1, len(times)):
-            t_curr = times[step - 1]
-            t_next = times[step]
+        # 主时间循环（动态时间步长）
+        t_curr = 0.0
+        step = 0
+        
+        while t_curr < total_time:
+            step += 1
+            
+            # 自适应时间步长
+            if use_adaptive_dt and step > 1:
+                # 计算当前最大流速
+                max_velocity = 0.0
+                for i in range(num_sections):
+                    area = sections[i].area(depths[i])
+                    if area > 1e-6:
+                        velocity = abs(discharges[i] / area)
+                        max_velocity = max(max_velocity, velocity)
+                
+                # CFL条件：Co = v * dt / dx < cfl_max
+                dx_min = np.min(np.diff(stations))
+                if max_velocity > 0.1:  # 避免除零
+                    dt_cfl = cfl_max * dx_min / max_velocity
+                    current_dt = np.clip(dt_cfl, min_dt, max_dt)
+                    # 平滑变化
+                    if len(dt_history) > 0:
+                        prev_dt = dt_history[-1]
+                        current_dt = np.clip(current_dt, 0.5*prev_dt, 1.5*prev_dt)
+            
+            # 确保不超过总时间
+            if t_curr + current_dt > total_time:
+                current_dt = total_time - t_curr
+            
+            t_next = t_curr + current_dt
+            dt_history.append(current_dt)
             
             old_depths = depths.copy()
             old_discharges = discharges.copy()
             
-            # 应用边界条件
+            # 应用上游边界条件（流量边界）
             q_up = max(self.bc.get_upstream_discharge(t_next), 0.0)
-            h_up = self.bc.get_upstream_stage(t_next, q_up)
-            
             discharges[0] = q_up
-            depths[0] = max(h_up - bed_elevations[0], self.min_depth)
+            
+            # 上游水深：使用稳健的迭代方法
+            section_0 = sections[0]
+            h_guess = depths[0]  # 使用上一步水深作为初值
+            
+            # 简单但稳健的迭代（基于流速合理性）
+            for iter_count in range(15):
+                area = section_0.area(h_guess)
+                if area < 1e-6:
+                    h_guess = self.min_depth
+                    break
+                
+                velocity = q_up / area
+                
+                # 根据流速调整水深（更保守的策略）
+                if velocity > 2.5:  # 流速过大
+                    h_new = h_guess * 1.05  # 增加5%
+                elif velocity < 0.3:  # 流速过小
+                    h_new = h_guess * 0.95  # 减少5%
+                else:
+                    # 流速在合理范围[0.3, 2.5] m/s
+                    break
+                
+                # 检查收敛
+                if abs(h_new - h_guess) / h_guess < 0.01:
+                    h_guess = h_new
+                    break
+                
+                h_guess = h_new
+                h_guess = np.clip(h_guess, self.min_depth, section_0.max_depth)
+            
+            depths[0] = h_guess
             
             # Picard迭代
             for iteration in range(self.max_iterations):
@@ -254,7 +324,10 @@ class PreissmannHydrodynamicSolver:
                     
                     target_q = old_discharges[i] - dt * 9.81 * area_avg * momentum_term
                     new_q = (1 - self.relaxation) * prev_discharges[i] + self.relaxation * target_q
-                    discharges[i] = np.clip(new_q, -500.0, 500.0)
+                    
+                    # 更合理的流量限制（基于断面特性）
+                    max_reasonable_q = 3.0 * section.area(section.max_depth)  # 假设最大流速3m/s
+                    discharges[i] = np.clip(new_q, -max_reasonable_q, max_reasonable_q)
                 
                 # 连续性方程更新水深
                 for i in range(1, num_sections - 1):
@@ -285,16 +358,21 @@ class PreissmannHydrodynamicSolver:
                         depth_new = area_new / b if b > 0 else self.min_depth
                     
                     depth_new = max(depth_new, self.min_depth)
-                    # 限制变化幅度，避免数值震荡
-                    depth_new = np.clip(depth_new, prev_depths[i] - 0.2, prev_depths[i] + 0.2)
+                    # 限制变化幅度，避免数值震荡（更严格的限制）
+                    max_change = min(0.1, 0.1 * prev_depths[i])  # 限制在10%或0.1m
+                    depth_new = np.clip(depth_new, 
+                                       prev_depths[i] - max_change, 
+                                       prev_depths[i] + max_change)
                     depth_new = np.clip(depth_new, self.min_depth, section.max_depth)
                     
                     depths[i] = depth_new
                 
-                # 下游边界条件
+                # 下游边界条件（水位边界）
                 q_down = discharges[-2]
                 h_down = self.bc.get_downstream_stage(t_next, q_down)
                 depths[-1] = max(h_down - bed_elevations[-1], self.min_depth)
+                
+                # 流量从上游传递，保证连续性
                 discharges[-1] = discharges[-2]
                 
                 # 检查收敛性
@@ -314,11 +392,28 @@ class PreissmannHydrodynamicSolver:
                 )
                 mesh_quality_history.append(metrics)
             
+            # 质量守恒检查（仅监控，不在阶跃时刻校正）
+            q_inlet = discharges[0]
+            q_outlet = discharges[-1]
+            mass_balance_error = abs(q_outlet - q_inlet) / (q_inlet + 1e-10)
+            
             # 保存结果
-            if step % save_interval == 0:
+            if save_interval is None or step % save_interval == 0:
                 saved_times.append(t_next)
                 saved_depths.append(depths.copy())
                 saved_discharges.append(discharges.copy())
+            
+            # 更新时间
+            t_curr = t_next
+            
+            # 输出进度（每100步）
+            if step % 100 == 0:
+                progress = t_curr / total_time * 100
+                v_max = max(abs(discharges[i] / sections[i].area(depths[i])) 
+                           if sections[i].area(depths[i]) > 1e-6 else 0 
+                           for i in range(num_sections))
+                print(f"进度: {progress:.1f}% (t={t_curr/3600:.2f}h, 步数={step}, "
+                      f"dt={current_dt:.2f}s, v_max={v_max:.3f}m/s, 质守={mass_balance_error*100:.1f}%)")
         
         # 构造结果
         saved_times = np.array(saved_times)

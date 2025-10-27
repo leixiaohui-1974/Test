@@ -15,6 +15,7 @@ from .hydrodynamics.preissmann_solver import (
     PreissmannHydrodynamicSolver,
     HydrodynamicResults,
 )
+from .hydrodynamics.quasi_steady_solver import QuasiSteadySolver
 from .hydrodynamics.boundary_conditions import BoundaryConditions
 from .water_quality.advection_diffusion_solver import (
     WaterQualitySolver,
@@ -36,6 +37,7 @@ class SimulationConfig:
     
     # 水动力学参数
     enable_hydrodynamics: bool = True
+    hydrodynamic_solver_type: str = "quasi_steady"  # "quasi_steady" or "preissmann"
     initial_depth: float = 2.0  # 初始水深 (m)
     initial_discharge: float = 10.0  # 初始流量 (m³/s)
     
@@ -185,19 +187,41 @@ class IntegratedSimulator:
         config: SimulationConfig,
     ) -> HydrodynamicResults:
         """运行水动力学模拟"""
-        self.hydro_solver = PreissmannHydrodynamicSolver(
-            channel=self.channel,
-            boundary_conditions=self.boundary_conditions,
-            enable_adaptive_mesh=False,  # 简化，不启用自适应网格
-        )
-        
-        results = self.hydro_solver.solve(
-            total_time=config.total_time,
-            dt=config.dt,
-            initial_depth=config.initial_depth,
-            initial_discharge=config.initial_discharge,
-            save_interval=config.save_interval,
-        )
+        if config.hydrodynamic_solver_type == "quasi_steady":
+            # 准稳态求解器（推荐，完全守恒）
+            print("  使用准稳态求解器（完全守恒方案）")
+            self.hydro_solver = QuasiSteadySolver(
+                channel=self.channel,
+                boundary_conditions=self.boundary_conditions,
+            )
+            
+            results = self.hydro_solver.solve(
+                total_time=config.total_time,
+                dt=max(config.dt, 60.0),  # 准稳态建议dt>=60s
+                initial_depth=config.initial_depth,
+                initial_discharge=config.initial_discharge,
+                save_interval=config.save_interval,
+            )
+        else:
+            # Preissmann求解器（有限可用）
+            print("  使用Preissmann求解器（注意质量守恒误差）")
+            self.hydro_solver = PreissmannHydrodynamicSolver(
+                channel=self.channel,
+                boundary_conditions=self.boundary_conditions,
+                enable_adaptive_mesh=False,
+            )
+            
+            results = self.hydro_solver.solve(
+                total_time=config.total_time,
+                dt=config.dt,
+                initial_depth=config.initial_depth,
+                initial_discharge=config.initial_discharge,
+                save_interval=config.save_interval,
+                use_adaptive_dt=True,
+                cfl_max=0.8,
+                min_dt=1.0,
+                max_dt=20.0,
+            )
         
         return results
     
